@@ -126,3 +126,7 @@ dmypy.json
 temp/
 output/
 output_*/
+
+# Merge Tool generated files
+merge_files/workspace_temp/
+merge_files/KET_QUA/
