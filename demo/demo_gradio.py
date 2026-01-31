@@ -40,6 +40,7 @@ from dots_ocr.utils import dict_promptmode_to_prompt
 from dots_ocr.utils.consts import MIN_PIXELS, MAX_PIXELS
 from dots_ocr.utils.demo_utils.display import read_image
 from dots_ocr.utils.doc_utils import load_images_from_pdf
+from dots_ocr.utils.merge_utils import create_download_package, count_files_in_zip, get_zip_size_mb
 
 # Add DotsOCRParser import
 from dots_ocr.parser import DotsOCRParser
@@ -87,7 +88,11 @@ def get_initial_session_state():
             "file_type": None,
             "is_parsed": False,
             "results": []
-        }
+        },
+        'current_output_dir': None,  # NEW: Store output directory for download
+        'num_pages': 0,               # NEW: Store number of pages
+        'is_pdf': False,               # NEW: Track if input is PDF
+        'filename_base': None          # NEW: Store original filename
     }
 
 def read_image_v2(img):
@@ -162,6 +167,73 @@ def turn_page(direction, session_state):
             current_image = result['layout_image']
     
     return current_image, page_info, current_json, session_state
+
+
+def generate_download_package(session_state, format_choice, scope_choice):
+    """
+    Generate a download package based on user's format and scope choices
+    
+    Args:
+        session_state: Current session state
+        format_choice: "Markdown Files (.md)" | "JSON Files (.json)" | "Both (MD + JSON)"
+        scope_choice: "Individual Pages" | "Merged Document" | "Both"
+        
+    Returns:
+        Tuple of (zip_file_path, status_message)
+    """
+    output_dir = session_state.get('current_output_dir')
+    filename_base = session_state.get('filename_base', 'document')
+    
+    if not output_dir or not os.path.exists(output_dir):
+        return None, "❌ No processing results found. Please parse a document first."
+    
+    # Map UI choices to internal codes
+    format_map = {
+        "Markdown Files (.md)": "markdown",
+        "JSON Files (.json)": "json",
+        "Both (MD + JSON)": "both"
+    }
+    
+    scope_map = {
+        "Individual Pages": "individual",
+        "Merged Document": "merged",
+        "Both": "both"
+    }
+    
+    format_code = format_map.get(format_choice, "markdown")
+    scope_code = scope_map.get(scope_choice, "merged")
+    
+    try:
+        # Create download package
+        zip_path = create_download_package(
+            output_dir=output_dir,
+            format_choice=format_code,
+            scope_choice=scope_code,
+            filename_base=filename_base
+        )
+        
+        if not zip_path or not os.path.exists(zip_path):
+            return None, "❌ Failed to create download package. No matching files found."
+        
+        # Get package info
+        num_files = count_files_in_zip(zip_path)
+        size_mb = get_zip_size_mb(zip_path)
+        
+        status_msg = f"""✅ **Package Created Successfully!**
+
+📦 **Package Info:**
+- Total Files: {num_files}
+- Package Size: {size_mb:.2f} MB
+- Format: {format_choice}
+- Scope: {scope_choice}
+
+Click the download button above to save the package."""
+        
+        return zip_path, status_msg
+        
+    except Exception as e:
+        return None, f"❌ Error creating package: {str(e)}"
+
 
 
 
@@ -359,6 +431,12 @@ def process_image_inference(session_state, file_input,
                 'pdf_results': pdf_result['parsed_results']
             })
             
+            # NEW: Store output dir and metadata for download
+            session_state['current_output_dir'] = pdf_result['temp_dir']
+            session_state['num_pages'] = pdf_result['total_pages']
+            session_state['is_pdf'] = True
+            session_state['filename_base'] = os.path.splitext(os.path.basename(input_file_path))[0]
+            
             total_elements = len(pdf_result['combined_cells_data'])
             info_text = f"**PDF Information:**\n- Total Pages: {pdf_result['total_pages']}\n- Server: {current_config['ip']}:{current_config['port_vllm']}\n- Total Detected Elements: {total_elements}\n- Session ID: {pdf_result['session_id']}"
             
@@ -411,6 +489,12 @@ def process_image_inference(session_state, file_input,
                 'temp_dir': parse_result['temp_dir'], 'session_id': parse_result['session_id'],
                 'result_paths': parse_result['result_paths']
             })
+            
+            # NEW: Store output dir and metadata for download (image case)
+            session_state['current_output_dir'] = parse_result['temp_dir']
+            session_state['num_pages'] = 1
+            session_state['is_pdf'] = False
+            session_state['filename_base'] = os.path.splitext(os.path.basename(input_file_path))[0]
             
             num_elements = len(parse_result['cells_data']) if parse_result['cells_data'] else 0
             info_text = f"**Image Information:**\n- Original Size: {original_image.width} x {original_image.height}\n- Model Input Size: {parse_result['input_width']} x {parse_result['input_height']}\n- Server: {current_config['ip']}:{current_config['port_vllm']}\n- Detected {num_elements} layout elements\n- Session ID: {parse_result['session_id']}"
@@ -608,12 +692,58 @@ def create_gradio_interface():
                                     show_label=False
                                 )
                 
-                # Download Button
+                # Download Button (existing results ZIP)
                 with gr.Row():
                     download_btn = gr.DownloadButton(
-                        "⬇️ Download Results",
+                        "⬇️ Download All Results (Legacy)",
                         visible=False
                     )
+                
+                # NEW: Download Options Section
+                with gr.Accordion("📥 Download Options", open=True, visible=False) as download_options_section:
+                    gr.Markdown("### Choose what to download:")
+                    
+                    with gr.Row():
+                        # Format selection
+                        format_radio = gr.Radio(
+                            choices=[
+                                "Markdown Files (.md)",
+                                "JSON Files (.json)",
+                                "Both (MD + JSON)"
+                            ],
+                            value="Markdown Files (.md)",
+                            label="📄 File Format",
+                            info="Select the output format you need"
+                        )
+                        
+                        # Scope selection
+                        scope_radio = gr.Radio(
+                            choices=[
+                                "Individual Pages",
+                                "Merged Document",
+                                "Both"
+                            ],
+                            value="Merged Document",
+                            label="📚 Download Scope",
+                            info="Individual = separate files per page, Merged = all pages combined"
+                        )
+                    
+                    # Download button
+                    generate_package_btn = gr.Button(
+                        "📥 Generate Download Package",
+                        variant="primary",
+                        size="lg"
+                    )
+                    
+                    # Output file
+                    package_download = gr.File(
+                        label="📦 Download Package Ready",
+                        interactive=False,
+                        visible=False
+                    )
+                    
+                    # Status message
+                    download_status = gr.Markdown("", visible=False)
         
 
         
@@ -650,6 +780,10 @@ def create_gradio_interface():
                 result_image, info_display, md_output, md_raw_output,
                 download_btn, page_info, current_page_json, session_state
             ]
+        ).then(
+            # Show download options after successful parse
+            fn=lambda: gr.update(visible=True),
+            outputs=[download_options_section]
         )
         
         clear_btn.click(
@@ -660,6 +794,17 @@ def create_gradio_interface():
                 result_image, info_display, md_output, md_raw_output,
                 download_btn, page_info, current_page_json, session_state
             ]
+        )
+        
+        # NEW: Wire up download package generator
+        generate_package_btn.click(
+            fn=generate_download_package,
+            inputs=[session_state, format_radio, scope_radio],
+            outputs=[package_download, download_status]
+        ).then(
+            # Show outputs after generation
+            fn=lambda: (gr.update(visible=True), gr.update(visible=True)),
+            outputs=[package_download, download_status]
         )
     
     return demo

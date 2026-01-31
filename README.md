@@ -61,7 +61,31 @@ Open your browser at `http://localhost:7860`.
 *   **Advanced Prompts:** Select specialized prompts for Markdown extraction, Layout analysis, or Data cleaning.
 *   **Rate Limiting Control:** Adjustable delay settings to prevent API rate limits.
 *   **Interactive Preview:** View parsed results and original layout side-by-side.
-*   **Export:** Download results as JSON or Markdown.
+*   **🆕 Download Options:** Choose format (Markdown/JSON) and scope (Individual Pages/Merged Document) to create custom download packages.
+*   **🆕 Smart Merging:** Automatically merge multi-page documents with intelligent hyphenation removal and proper formatting.
+
+#### Download Options
+
+After parsing your document, the **Download Options** section provides flexible export choices:
+
+1. **File Format:**
+   - `Markdown Files (.md)` - Text content with formatting
+   - `JSON Files (.json)` - Structured layout data
+   - `Both (MD + JSON)` - Get both formats
+
+2. **Download Scope:**
+   - `Individual Pages` - Separate file for each page
+   - `Merged Document` - All pages combined into one file
+   - `Both` - Get individual files + merged document
+
+3. **Generate Package:**
+   - Click "📥 Generate Download Package"
+   - Download the ZIP file containing your selected files
+
+**Merged Documents Include:**
+- Automatic page concatenation with separators
+- Smart hyphenation removal across line breaks
+- Proper document structure and formatting
 
 ### 2. Command Line Interface (CLI)
 
